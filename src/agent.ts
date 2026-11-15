@@ -48,10 +48,10 @@ class FrameGrabber {
       const f = this.latestFrame.type !== VideoBufferType.RGBA
         ? this.latestFrame.convert(VideoBufferType.RGBA)
         : this.latestFrame;
-      // 640×480 @ q60 — gpt-6.1-terra detail:low sweet spot (~85 vision tokens)
+      // 1280×720 @ q70 — gpt-6.1-terra detail:high for fine object distinction
       const jpeg = await sharp(Buffer.from(f.data), {
         raw: { width: f.width, height: f.height, channels: 4 },
-      }).resize(640, 480).jpeg({ quality: 60 }).toBuffer();
+      }).resize(1280, 720).jpeg({ quality: 70 }).toBuffer();
       return jpeg.toString('base64');
     } catch (err) {
       console.error('[vision] toJpegBase64 error:', err);
@@ -294,7 +294,7 @@ export default defineAgent({
   prewarm: async (proc: JobProcess) => {
     // Initialize plugins here so entry() doesn't block the event loop on first call
     proc.userData.stt = new STT({ apiKey: process.env.DEEPGRAM_API_KEY });
-    proc.userData.llm = new LLM({ model: 'gemini-3.6-flash', apiKey: process.env.GEMINI_API_KEY });
+    proc.userData.llm = new LLM({ model: 'gemini-3.6-flash', apiKey: process.env.GEMINI_API_KEY, maxOutputTokens: 400 });
     proc.userData.tts = new TTS({ apiKey: process.env.ELEVENLABS_API_KEY });
   },
 
@@ -357,8 +357,36 @@ export default defineAgent({
       const session = new voice.AgentSession();
       await session.start({ agent, room: ctx.room });
 
-      // Vision loop disabled — scan phase now uses verbal item names only.
-      // Camera is used only for check_object during fetch play.
+      // Auto-scan loop — fires every 2.5 s during scan phase only.
+      // Vision is now on OpenAI (not LiveKit inference proc) so concurrent calls
+      // no longer crash the subprocess. visionBusy still prevents double-sends.
+      (async () => {
+        while (true) {
+          await new Promise(r => setTimeout(r, 2500));
+          if (gameState.phase !== 'scanning' || state.visionBusy) continue;
+          const frame = await grabber.toJpegBase64();
+          if (!frame) continue;
+          state.visionBusy = true;
+          try {
+            const alreadyScanned = gameState.fetchList.map(i => i.english);
+            const result = await Promise.race([
+              identifyObject(frame, state.targetLanguage, alreadyScanned),
+              new Promise<null>(r => setTimeout(() => r(null), 8000)),
+            ]).catch(() => null);
+            // Re-check phase — start_fetch_game may have fired while we awaited
+            if (gameState.phase !== 'scanning') continue;
+            if (!result?.english) continue;
+            const lower = result.english.toLowerCase();
+            if (lower === state.lastAnnounced.toLowerCase()) continue;
+            if (alreadyScanned.some(e => e.toLowerCase() === lower)) continue;
+            state.lastAnnounced = result.english;
+            addScannedItem(gameState, result.english, result.translation);
+            await session.say(`Got it — a ${result.english}! Show me the next one.`);
+          } finally {
+            state.visionBusy = false;
+          }
+        }
+      })().catch(err => console.error('[vision-loop] crashed:', err));
 
     } catch (err) {
       console.error('[mi-solecito] entry function crashed:', err);

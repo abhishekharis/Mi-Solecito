@@ -29,14 +29,14 @@ Rules:
   try {
     const response = await (getClient() as any).responses.create({
       model: 'gpt-6.1-terra',
-      reasoning: { effort: 'none' },
+      reasoning: { effort: 'low' },
       store: false,
       max_output_tokens: 60,
       input: [{
         role: 'user',
         content: [
           { type: 'input_text', text: prompt },
-          { type: 'input_image', image_url: `data:image/jpeg;base64,${frameData}`, detail: 'low' },
+          { type: 'input_image', image_url: `data:image/jpeg;base64,${frameData}`, detail: 'high' },
         ],
       }],
       text: {
@@ -66,23 +66,27 @@ Rules:
 export async function identifyObject(
   frameData: string,
   targetLanguage: string,
+  alreadyScanned: string[] = [],
 ): Promise<{ english: string; translation: string } | null> {
+  const context = alreadyScanned.length > 0
+    ? `\nAlready scanned (skip these): ${alreadyScanned.join(', ')}.`
+    : '';
   const prompt = `You are a language tutor. Identify the most prominent physical OBJECT being held or displayed.
 Ignore people, hands, and body parts entirely.
 If the most visible thing is a person with no clear object, or the frame is unclear, return empty strings.
-Provide the object name in English and its translation in ${targetLanguage} with article if applicable.`;
+Provide the object name in English and its translation in ${targetLanguage} with article if applicable.${context}`;
 
   try {
     const response = await (getClient() as any).responses.create({
       model: 'gpt-6.1-terra',
-      reasoning: { effort: 'none' },
+      reasoning: { effort: 'low' },
       store: false,
       max_output_tokens: 60,
       input: [{
         role: 'user',
         content: [
           { type: 'input_text', text: prompt },
-          { type: 'input_image', image_url: `data:image/jpeg;base64,${frameData}`, detail: 'low' },
+          { type: 'input_image', image_url: `data:image/jpeg;base64,${frameData}`, detail: 'high' },
         ],
       }],
       text: {
