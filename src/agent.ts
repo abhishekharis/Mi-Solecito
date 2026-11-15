@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url';
 import { ServerOptions, cli, defineAgent, JobContext, JobProcess, llm, voice } from '@livekit/agents';
 import { realtime } from '@livekit/agents-plugin-google';
 import { AgentDispatchClient } from 'livekit-server-sdk';
-import { VideoStream, VideoBufferType } from '@livekit/rtc-node';
+import { VideoStream, VideoBufferType, TrackKind, RoomEvent } from '@livekit/rtc-node';
 import sharp from 'sharp';
 import type { VideoFrame } from '@livekit/rtc-node';
 import { checkObject, identifyObject } from './vision.js';
@@ -30,11 +30,21 @@ export async function dispatchAgent(roomName: string, _callId: string): Promise<
 // ── Frame grabber ─────────────────────────────────────────────────────────────
 class FrameGrabber {
   private latestFrame: VideoFrame | null = null;
+  private frameCount = 0;
 
-  feed(frame: VideoFrame) { this.latestFrame = frame; }
+  feed(frame: VideoFrame) {
+    this.frameCount++;
+    if (this.frameCount === 1) {
+      console.log(`[vision] first frame received — ${frame.width}x${frame.height} type=${frame.type}`);
+    }
+    this.latestFrame = frame;
+  }
 
   async toJpegBase64(): Promise<string | null> {
-    if (!this.latestFrame) return null;
+    if (!this.latestFrame) {
+      console.log('[vision] toJpegBase64 called but no frame captured yet');
+      return null;
+    }
     try {
       const f = this.latestFrame.type !== VideoBufferType.RGBA
         ? this.latestFrame.convert(VideoBufferType.RGBA)
@@ -42,8 +52,10 @@ class FrameGrabber {
       const jpeg = await sharp(Buffer.from(f.data), {
         raw: { width: f.width, height: f.height, channels: 4 },
       }).jpeg({ quality: 75 }).toBuffer();
+      console.log(`[vision] JPEG encoded — ${jpeg.length} bytes from ${f.width}x${f.height}`);
       return jpeg.toString('base64');
-    } catch {
+    } catch (err) {
+      console.error('[vision] toJpegBase64 error:', err);
       return null;
     }
   }
@@ -241,18 +253,34 @@ export default defineAgent({
 
       await ctx.connect();
 
-      ctx.room.on('trackSubscribed', (track: any) => {
-        if (track.kind === 'video') {
-          const stream = new VideoStream(track);
-          (async () => {
-            for await (const event of stream) {
-              grabber.feed(event.frame);
-            }
-          })().catch(() => {});
-        }
+      const startVideoStream = (track: any) => {
+        console.log(`[vision] attaching VideoStream — kind=${track.kind} sid=${track.sid}`);
+        const stream = new VideoStream(track);
+        (async () => {
+          for await (const event of stream) {
+            grabber.feed(event.frame);
+          }
+        })().catch(err => console.error('[vision] VideoStream error:', err));
+      };
+
+      // kind is a numeric enum: TrackKind.KIND_VIDEO === 2 (not the string 'video')
+      ctx.room.on(RoomEvent.TrackSubscribed, (track: any) => {
+        console.log(`[vision] trackSubscribed event — kind=${track.kind}`);
+        if (track.kind === TrackKind.KIND_VIDEO) startVideoStream(track);
       });
 
       await ctx.waitForParticipant();
+
+      // Catch tracks already subscribed before the listener was registered
+      for (const participant of ctx.room.remoteParticipants.values()) {
+        for (const pub of (participant as any).trackPublications.values()) {
+          const t = (pub as any).track;
+          if (t && t.kind === TrackKind.KIND_VIDEO) {
+            console.log('[vision] found already-subscribed video track');
+            startVideoStream(t);
+          }
+        }
+      }
 
       const tools = buildTools(grabber, gameState, state);
 
