@@ -10,6 +10,7 @@ export interface FetchItem {
   english: string;
   translation: string | null; // null = agent uses its own LLM knowledge
   hint: string | null;
+  correct?: boolean;
 }
 
 export interface GameState {
@@ -116,6 +117,7 @@ export function advanceFetch(
   state: GameState,
   wasCorrect: boolean,
 ): { item: FetchItem | null; done: boolean } {
+  state.fetchList[state.currentIndex]!.correct = wasCorrect;
   if (wasCorrect) state.score++;
   state.currentIndex++;
   if (state.currentIndex >= state.fetchList.length) {

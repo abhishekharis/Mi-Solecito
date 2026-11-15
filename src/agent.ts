@@ -71,6 +71,27 @@ function buildTools(
   gameState: GameState,
   state: { targetLanguage: string; consecutiveUnclear: number },
 ) {
+  // Fire-and-forget: push the final score to the companion score card page
+  const pushScore = (): void => {
+    const port = process.env.PORT ?? '3000';
+    const words = gameState.fetchList.map(item => ({
+      english: item.english,
+      translation: item.translation,
+      correct: item.correct ?? false,
+    }));
+    fetch(`http://localhost:${port}/score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        score: gameState.score,
+        total: gameState.fetchList.length,
+        words,
+        language: state.targetLanguage,
+        timestamp: Date.now(),
+      }),
+    }).catch(err => console.error('[score] push failed:', err));
+  };
+
   // Show & Say: identify whatever the learner is holding
   const showAndSay = llm.tool({
     name: 'show_and_say',
@@ -165,6 +186,7 @@ function buildTools(
       state.consecutiveUnclear = 0;
       const { item, done } = advanceFetch(gameState, wasCorrect);
       if (done) {
+        pushScore();
         return { done: true, score: gameState.score, total: gameState.fetchList.length };
       }
       return { done: false, nextItem: { english: item!.english, translation: item!.translation } };
