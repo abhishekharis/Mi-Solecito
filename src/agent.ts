@@ -98,6 +98,9 @@ function buildTools(
     description: "Identify the object in the caller's camera. Call this ONLY in Show & Say mode — never during the fetch game.",
     parameters: { type: 'object', properties: { language: { type: 'string' } }, required: ['language'] },
     execute: async (args: Args) => {
+      if (gameState.phase === 'fetching') {
+        return { success: false, message: 'Wrong mode — use check_object during the fetch game, not show_and_say.' };
+      }
       const language = args.language as string;
       state.targetLanguage = language;
       const frame = await grabber.toJpegBase64();
@@ -118,6 +121,9 @@ function buildTools(
     description: 'During the Fetch Game SCAN PHASE only: identify what the learner is showing and add it to the game list. Never call during fetch play phase. Returns how many items are in the list so far.',
     parameters: { type: 'object', properties: { language: { type: 'string' } }, required: ['language'] },
     execute: async (args: Args) => {
+      if (gameState.phase === 'fetching' || gameState.phase === 'done') {
+        return { success: false, message: 'Wrong phase — scan phase is over. Use check_object to verify items during fetch play.' };
+      }
       const language = args.language as string;
       state.targetLanguage = language;
       const frame = await grabber.toJpegBase64();
@@ -157,9 +163,12 @@ function buildTools(
   // Check object during fetch game
   const checkObj = llm.tool({
     name: 'check_object',
-    description: "Check whether the caller is showing the requested object. Returns match, close, or no_match. Always call before judging.",
+    description: "Check whether the caller is showing the requested object during FETCH PLAY. Returns match, close, or no_match. Always call before judging.",
     parameters: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] },
     execute: async (args: Args) => {
+      if (gameState.phase !== 'fetching') {
+        return { result: 'error', message: 'Wrong phase — check_object is only for the fetch play phase.' };
+      }
       const target = args.target as string;
       const frame = await grabber.toJpegBase64();
       if (!frame) {
@@ -182,6 +191,9 @@ function buildTools(
     description: 'Advance to the next item in the fetch game after a correct answer or after two failed attempts.',
     parameters: { type: 'object', properties: { wasCorrect: { type: 'boolean' } }, required: ['wasCorrect'] },
     execute: async (args: Args) => {
+      if (gameState.phase !== 'fetching') {
+        return { error: true, message: 'Wrong phase — next_item is only for the fetch play phase.' };
+      }
       const wasCorrect = args.wasCorrect as boolean;
       state.consecutiveUnclear = 0;
       const { item, done } = advanceFetch(gameState, wasCorrect);
