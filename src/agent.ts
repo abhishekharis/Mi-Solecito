@@ -348,10 +348,7 @@ export default defineAgent({
       (async () => {
         while (true) {
           await new Promise(r => setTimeout(r, 2500));
-          if (
-            (gameState.phase !== 'idle' && gameState.phase !== 'scanning') ||
-            !state.targetLanguage
-          ) continue;
+          if (gameState.phase !== 'scanning' || !state.targetLanguage) continue;
           const frame = await grabber.toJpegBase64();
           if (!frame) continue;
           const result = await identifyObject(frame, state.targetLanguage).catch(() => null);
