@@ -3,6 +3,18 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import { dispatchAgent } from './agent.js';
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+
+interface ScorePayload {
+  score: number;
+  total: number;
+  words: { english: string; translation: string | null; correct: boolean }[];
+  language: string;
+  timestamp: number;
+}
+let latestScore: ScorePayload | null = null;
 
 const app = new Hono();
 
@@ -45,6 +57,22 @@ app.post('/webhooks/chert', async (c) => {
 });
 
 app.get('/health', (c) => c.json({ status: 'ok' }));
+
+app.post('/score', async (c) => {
+  latestScore = await c.req.json<ScorePayload>();
+  return c.json({ ok: true });
+});
+
+app.get('/score', (c) => {
+  if (!latestScore) return c.json({ waiting: true });
+  return c.json(latestScore);
+});
+
+app.get('/scoreboard', (c) => {
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const html = readFileSync(join(__dir, 'score-card.html'), 'utf-8');
+  return c.html(html);
+});
 
 const port = parseInt(process.env.PORT ?? '3000', 10);
 serve({ fetch: app.fetch, port }, () => {
