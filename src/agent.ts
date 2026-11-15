@@ -142,7 +142,8 @@ function buildTools(
       }
       state.consecutiveUnclear = 0;
       const count = addScannedItem(gameState, result.english, result.translation);
-      return { success: true, english: result.english, translation: result.translation, totalScanned: count };
+      // Do NOT return translation — scan phase confirmation is English only
+      return { success: true, english: result.english, totalScanned: count };
     },
   });
 
@@ -264,7 +265,7 @@ SHOW AND SAY MODE:
 
 FETCH GAME — SCAN PHASE:
 - Tell the learner: "Great! Hold up 5 things near you one at a time — say 'here' when you're holding each one still and I'll identify it."
-- When they say any word ("here", "ready", "this", "go"), call add_to_fetch_list immediately. Confirm each item: "Got it — cup, that's la taza! Show me the next one."
+- When they say any word ("here", "ready", "this", "go"), call add_to_fetch_list immediately. Confirm each item in ENGLISH ONLY: "Got it — a cup! Show me the next one." NEVER say the target-language word during the scan phase.
 - After 5 items (or more if they want), say: "Perfect, I've got your items. Let's play!"
 - Call start_fetch_game to begin. Use the returned firstItem as the first challenge.
 - Do NOT call start_fetch_game until the learner has shown at least 5 objects.
