@@ -294,7 +294,7 @@ export default defineAgent({
   prewarm: async (proc: JobProcess) => {
     // Initialize plugins here so entry() doesn't block the event loop on first call
     proc.userData.stt = new STT({ apiKey: process.env.DEEPGRAM_API_KEY });
-    proc.userData.llm = new LLM({ model: 'gemini-3.5-flash-lite', apiKey: process.env.GEMINI_API_KEY });
+    proc.userData.llm = new LLM({ model: 'gemini-3.6-flash', apiKey: process.env.GEMINI_API_KEY });
     proc.userData.tts = new TTS({ apiKey: process.env.ELEVENLABS_API_KEY });
   },
 
