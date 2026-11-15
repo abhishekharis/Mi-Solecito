@@ -1,0 +1,32 @@
+{
+  "name": "show-and-say",
+  "version": "0.1.0",
+  "description": "FaceTime language-practice tutor using Chert + LiveKit + Gemini Live",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "agent": "node dist/agent.js start",
+    "server": "node dist/server.js",
+    "dev": "npm run build && npm run agent & npm run server",
+    "tunnel": "npx cloudflared tunnel --url http://localhost:3000",
+    "chert:setup": "npx @trychert/facetime setup",
+    "chert:doctor": "npx @trychert/facetime doctor",
+    "chert:dev": "npx @trychert/facetime dev",
+    "setup:env": "node scripts/setup-env.mjs"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@hono/node-server": "^1.13.7",
+    "@livekit/agents": "^1.10.0",
+    "@livekit/agents-plugin-google": "^1.10.0",
+    "dotenv": "^16.4.7",
+    "hono": "^4.13.18",
+    "livekit-server-sdk": "^2.19.3",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
