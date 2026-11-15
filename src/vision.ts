@@ -1,20 +1,15 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export type VisionResult = 'match' | 'close' | 'no_match' | 'unclear';
 
 export interface CheckObjectResult {
   result: VisionResult;
-  seen: string; // what the model actually saw
+  seen: string;
   confidence: 'high' | 'low';
 }
 
-/**
- * Check whether the latest video frame shows the target object.
- * frameData: base64-encoded JPEG.
- */
 export async function checkObject(target: string, frameData: string): Promise<CheckObjectResult> {
   const prompt = `You are checking a video frame from a language-learning FaceTime call.
 Target object: "${target}"
@@ -35,14 +30,19 @@ Rules:
 - Keep "seen" to 3-5 words describing the object, never the person.
 - Output ONLY the JSON object, no extra text.`;
 
-  const imagePart = {
-    inlineData: { data: frameData, mimeType: 'image/jpeg' as const },
-  };
-
   try {
-    const response = await model.generateContent([prompt, imagePart]);
-    const text = response.response.text().trim();
-    // Strip markdown code fences if present
+    const response = await openai.chat.completions.create({
+      model: 'gpt-6.1-terra',
+      reasoning_effort: 'none',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frameData}` } },
+        ],
+      }],
+    });
+    const text = (response.choices[0].message.content ?? '').trim();
     const json = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
     return JSON.parse(json) as CheckObjectResult;
   } catch {
@@ -50,10 +50,6 @@ Rules:
   }
 }
 
-/**
- * Identify what object is in the frame (for show-and-say mode).
- * Returns the object name in English plus the target language translation.
- */
 export async function identifyObject(frameData: string, targetLanguage: string): Promise<{ english: string; translation: string } | null> {
   const prompt = `You are a language tutor. Look at this image and identify the most prominent OBJECT being held or displayed.
 Respond ONLY with valid JSON:
@@ -68,13 +64,19 @@ Rules:
 - If the frame is unclear or empty, respond with: {"english": "", "translation": ""}
 - Output ONLY the JSON object, no extra text.`;
 
-  const imagePart = {
-    inlineData: { data: frameData, mimeType: 'image/jpeg' as const },
-  };
-
   try {
-    const response = await model.generateContent([prompt, imagePart]);
-    const text = response.response.text().trim();
+    const response = await openai.chat.completions.create({
+      model: 'gpt-6.1-terra',
+      reasoning_effort: 'none',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${frameData}` } },
+        ],
+      }],
+    });
+    const text = (response.choices[0].message.content ?? '').trim();
     const json = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
     const parsed = JSON.parse(json) as { english: string; translation: string };
     return parsed.english ? parsed : null;
