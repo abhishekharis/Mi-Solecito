@@ -18,6 +18,8 @@
     "@google/generative-ai": "^0.24.1",
     "@hono/node-server": "^1.13.7",
     "@livekit/agents": "^1.10.0",
+    "@livekit/agents-plugin-deepgram": "^1.10.0",
+    "@livekit/agents-plugin-elevenlabs": "^1.10.0",
     "@livekit/agents-plugin-google": "^1.10.0",
     "dotenv": "^16.4.7",
     "hono": "^4.13.18",
