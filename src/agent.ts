@@ -112,26 +112,37 @@ function buildTools(
     },
   });
 
-  // Scan phase: learner says an item name aloud → agent adds it to the game list
+  // Scan phase: learner holds up an object and says "here" → agent identifies it with camera
   const addToFetchList = llm.tool({
     name: 'add_to_fetch_list',
-    description: 'During the Fetch Game SCAN PHASE only: add an item the learner just said aloud to the game list. Pass the English word and its translation in the target language. Never call during fetch play phase.',
-    parameters: {
-      type: 'object',
-      properties: {
-        english: { type: 'string', description: 'The object name in English' },
-        translation: { type: 'string', description: 'The object name in the target language with article' },
-      },
-      required: ['english', 'translation'],
-    },
+    description: 'During the Fetch Game SCAN PHASE only: take a camera snapshot to identify the object the learner is holding, then add it to the game list. Call this when the learner says "here", "ready", "this", or any word while holding an object. Never call during fetch play phase.',
+    parameters: { type: 'object', properties: { language: { type: 'string' } }, required: ['language'] },
     execute: async (args: Args) => {
       if (gameState.phase === 'fetching' || gameState.phase === 'done') {
         return { success: false, message: 'Wrong phase — scan phase is over. Use check_object during fetch play.' };
       }
-      const english = args.english as string;
-      const translation = args.translation as string;
-      const count = addScannedItem(gameState, english, translation);
-      return { success: true, english, translation, totalScanned: count };
+      const language = args.language as string;
+      state.targetLanguage = language;
+      const frame = await grabber.toJpegBase64();
+      if (!frame) {
+        state.consecutiveUnclear++;
+        return { success: false, message: 'No frame. Ask the learner to hold the item steady.' };
+      }
+      const result = await Promise.race([
+        identifyObject(frame, language),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 7000)),
+      ]).catch(() => null);
+      if (!result?.english) {
+        state.consecutiveUnclear++;
+        if (state.consecutiveUnclear >= 2) {
+          state.consecutiveUnclear = 0;
+          return { success: false, skipped: true, message: 'Still unclear — skip this item and ask them to show the next one.' };
+        }
+        return { success: false, message: 'Frame unclear. Ask the learner to hold the item closer in better light.' };
+      }
+      state.consecutiveUnclear = 0;
+      const count = addScannedItem(gameState, result.english, result.translation);
+      return { success: true, english: result.english, translation: result.translation, totalScanned: count };
     },
   });
 
@@ -252,11 +263,11 @@ SHOW AND SAY MODE:
 - If the learner says "quit" or "stop", ask if they want to try the Fetch Game or end the call.
 
 FETCH GAME — SCAN PHASE:
-- Tell the learner: "Great! Before we play, say 5 objects you can see near you — just name them one at a time and I'll add each one."
-- When they say an object name, call add_to_fetch_list with the English word and its [target language] translation (you know the translations). Confirm each one: "Got it — cup, that's la taza! What's the next one?"
+- Tell the learner: "Great! Hold up 5 things near you one at a time — say 'here' when you're holding each one still and I'll identify it."
+- When they say any word ("here", "ready", "this", "go"), call add_to_fetch_list immediately. Confirm each item: "Got it — cup, that's la taza! Show me the next one."
 - After 5 items (or more if they want), say: "Perfect, I've got your items. Let's play!"
 - Call start_fetch_game to begin. Use the returned firstItem as the first challenge.
-- Do NOT call start_fetch_game until the learner has named at least 5 objects.
+- Do NOT call start_fetch_game until the learner has shown at least 5 objects.
 
 FETCH GAME — PLAY PHASE:
 - Ask for each item using ONLY the target-language word — never say the English word during the fetch challenge. Example: "Can you find la taza?" NOT "Can you find the cup?" The learner must make the connection themselves.
