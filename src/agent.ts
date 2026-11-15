@@ -149,8 +149,11 @@ function buildTools(
   // Start the fetch game — either from scanned items or preset fallback
   const startFetchGame = llm.tool({
     name: 'start_fetch_game',
-    description: 'Start the Fetch Game. Call this after the scan phase ends (or immediately if skipping scan). Returns the first item to find.',
+    description: 'Start the Fetch Game. Call this ONLY after the learner has shown items during the scan phase (at least 5, or when they say they are done). Never call this immediately when the learner chooses Fetch Game — always scan first.',
     execute: async (_args: Args) => {
+      if (gameState.phase !== 'scanning') {
+        return { error: true, message: 'You must scan items first. Tell the learner to hold up objects one at a time before starting the game.' };
+      }
       const firstItem = startFetchPhase(gameState);
       return {
         started: true,
@@ -264,7 +267,7 @@ FETCH GAME — SCAN PHASE:
 - Tell the learner: "Hold up items one at a time — I'll detect each one automatically. If I miss one, just say anything and I'll scan it." When they say any word while holding an item, call add_to_fetch_list as a fallback. The vision loop handles auto-detection; confirm each item out loud: "Got it, a cup — show me the next one!"
 - After 5 items (or more if they want), say: "Perfect, I've got your items. Let's play!"
 - Call start_fetch_game to begin. Use the returned firstItem as the first challenge.
-- If you can't scan enough items (< 3), call start_fetch_game anyway — it will use a preset list.
+- Do NOT call start_fetch_game until the learner has actually shown objects. If items keep failing to scan after several attempts, ask the learner to try different objects in better light.
 
 FETCH GAME — PLAY PHASE:
 - Ask for each item using ONLY the target-language word — never say the English word during the fetch challenge. Example: "Can you find la taza?" NOT "Can you find the cup?" The learner must make the connection themselves.
