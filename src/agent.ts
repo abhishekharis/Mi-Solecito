@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { fileURLToPath } from 'url';
 import { ServerOptions, cli, defineAgent, JobContext, JobProcess, llm, voice } from '@livekit/agents';
-import { realtime } from '@livekit/agents-plugin-google';
+import { LLM } from '@livekit/agents-plugin-google';
+import { TTS } from '@livekit/agents-plugin-elevenlabs';
+import { STT } from '@livekit/agents-plugin-deepgram';
 import { AgentDispatchClient } from 'livekit-server-sdk';
 import { VideoStream, VideoBufferType, TrackKind, RoomEvent } from '@livekit/rtc-node';
 import sharp from 'sharp';
@@ -199,7 +201,7 @@ LANGUAGE MIXING RULES (critical for beginner learners):
 - Speak ENGLISH for all instructions, questions, hints, and explanations.
 - Speak the TARGET LANGUAGE only for: (1) the vocabulary word with its article (e.g. "la taza"), and (2) two fixed celebration/correction words: "¡Muy bien!" for correct, "¡Casi!" for close.
 - In show-and-say: say the English name first, then the target-language word with article. Example: "That's a cup — in Spanish, la taza. Can you say la taza?"
-- In the fetch game: ask for the item in English ("Can you find a cup?"), then give the word: "In Spanish that's la taza." After they show it, say "¡Muy bien! That's la taza."
+- In the fetch game: ask for the item using ONLY the target-language word: "Can you find la taza?" — no English. After they show it, say "¡Muy bien! That's la taza."
 - Never produce a full sentence in the target language. Never translate your instructions.
 
 CALL START SEQUENCE (do this in order, all in one turn):
@@ -217,13 +219,13 @@ SHOW AND SAY MODE:
 
 FETCH GAME — SCAN PHASE:
 - Tell the learner: "Great! Before we play, hold up 5 things near you one at a time — I'll remember what you have."
-- Tell the learner: "Hold up an item and say 'go' when you're holding it." When they say go (or any word indicating they're ready), call add_to_fetch_list. Confirm each one out loud: "Got it, a cup — show me the next one!"
+- Tell the learner: "Hold up an item one at a time and say anything — 'here', 'this', 'ready', or just 'go' — when you're holding it still." When they say any word while holding an item, call add_to_fetch_list. Confirm each one out loud: "Got it, a cup — show me the next one!"
 - After 5 items (or more if they want), say: "Perfect, I've got your items. Let's play!"
 - Call start_fetch_game to begin. Use the returned firstItem as the first challenge.
 - If you can't scan enough items (< 3), call start_fetch_game anyway — it will use a preset list.
 
 FETCH GAME — PLAY PHASE:
-- Ask for each item in English, then give the target-language word: "Can you find the cup? In Spanish that's la taza."
+- Ask for each item using ONLY the target-language word — never say the English word during the fetch challenge. Example: "Can you find la taza?" NOT "Can you find the cup?" The learner must make the connection themselves.
 - Tell the learner to say "here" or "got it" when they're holding the item up. When they do, call check_object with the English target.
 - On "match": say "¡Muy bien! That's la taza." then call next_item with wasCorrect: true.
 - On "close": say "¡Casi! That looks like it — maybe hold it a bit closer?" and try again.
@@ -243,10 +245,18 @@ QUIT AT ANY TIME:
 // ── Agent definition ──────────────────────────────────────────────────────────
 
 export default defineAgent({
-  prewarm: async (_proc: JobProcess) => { /* nothing to prewarm */ },
+  prewarm: async (proc: JobProcess) => {
+    // Initialize plugins here so entry() doesn't block the event loop on first call
+    proc.userData.stt = new STT({ apiKey: process.env.DEEPGRAM_API_KEY });
+    proc.userData.llm = new LLM({ model: 'gemini-3.5-flash-lite', apiKey: process.env.GEMINI_API_KEY });
+    proc.userData.tts = new TTS({ apiKey: process.env.ELEVENLABS_API_KEY });
+  },
 
   entry: async (ctx: JobContext) => {
     try {
+      const { stt, llm, tts } = ctx.proc.userData as {
+        stt: STT; llm: LLM; tts: TTS;
+      };
       const grabber = new FrameGrabber();
       const gameState: GameState = createGameState();
       const state = { targetLanguage: 'Spanish', consecutiveUnclear: 0 };
@@ -284,12 +294,6 @@ export default defineAgent({
 
       const tools = buildTools(grabber, gameState, state);
 
-      const model = new realtime.RealtimeModel({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        apiKey: process.env.GEMINI_API_KEY,
-        voice: 'Puck',
-      });
-
       class MiSolecitoAgent extends voice.Agent {
         override async onEnter(): Promise<void> {
           this.session.generateReply();
@@ -298,7 +302,9 @@ export default defineAgent({
 
       const agent = new MiSolecitoAgent({
         instructions: INSTRUCTIONS,
-        llm: model,
+        stt,
+        llm,
+        tts,
         tools: [...tools],
       });
 

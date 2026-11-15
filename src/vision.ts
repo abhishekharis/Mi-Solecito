@@ -22,16 +22,17 @@ Target object: "${target}"
 Look at the image and answer ONLY with valid JSON in this exact shape:
 {
   "result": "match" | "close" | "no_match" | "unclear",
-  "seen": "<one short phrase describing what you see, or 'nothing clear' if the frame is dark/blurry>",
+  "seen": "<one short phrase describing the object you see, or 'nothing clear' if the frame is dark/blurry>",
   "confidence": "high" | "low"
 }
 
 Rules:
+- Focus ONLY on physical objects — ignore any people, hands, or body parts in the frame.
 - "match": the target object is clearly visible.
 - "close": a similar or related object is visible (e.g. fork when spoon was asked).
-- "no_match": something else entirely is visible.
+- "no_match": something else entirely is visible (do not count a person as a match).
 - "unclear": the frame is too dark, blurry, or empty to judge.
-- Keep "seen" to 3-5 words.
+- Keep "seen" to 3-5 words describing the object, never the person.
 - Output ONLY the JSON object, no extra text.`;
 
   const imagePart = {
@@ -54,14 +55,18 @@ Rules:
  * Returns the object name in English plus the target language translation.
  */
 export async function identifyObject(frameData: string, targetLanguage: string): Promise<{ english: string; translation: string } | null> {
-  const prompt = `You are a language tutor. Look at this image and identify the most prominent object.
+  const prompt = `You are a language tutor. Look at this image and identify the most prominent OBJECT being held or displayed.
 Respond ONLY with valid JSON:
 {
   "english": "<object name in English, 1-3 words>",
-  "translation": "<translation in ${targetLanguage}>"
+  "translation": "<translation in ${targetLanguage} with article if applicable>"
 }
-If the frame is unclear, respond with: {"english": "", "translation": ""}
-Output ONLY the JSON object.`;
+
+Rules:
+- Identify the physical object, NOT the person holding it. Ignore people, hands, and body parts entirely.
+- If the most visible thing is a person with no clear object, respond with: {"english": "", "translation": ""}
+- If the frame is unclear or empty, respond with: {"english": "", "translation": ""}
+- Output ONLY the JSON object, no extra text.`;
 
   const imagePart = {
     inlineData: { data: frameData, mimeType: 'image/jpeg' as const },
