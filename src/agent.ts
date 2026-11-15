@@ -112,41 +112,26 @@ function buildTools(
     },
   });
 
-  // Scan phase: learner shows an item → agent identifies it → adds to game list
+  // Scan phase: learner says an item name aloud → agent adds it to the game list
   const addToFetchList = llm.tool({
     name: 'add_to_fetch_list',
-    description: 'During the Fetch Game SCAN PHASE only: identify what the learner is showing and add it to the game list. Never call during fetch play phase. Returns how many items are in the list so far.',
-    parameters: { type: 'object', properties: { language: { type: 'string' } }, required: ['language'] },
+    description: 'During the Fetch Game SCAN PHASE only: add an item the learner just said aloud to the game list. Pass the English word and its translation in the target language. Never call during fetch play phase.',
+    parameters: {
+      type: 'object',
+      properties: {
+        english: { type: 'string', description: 'The object name in English' },
+        translation: { type: 'string', description: 'The object name in the target language with article' },
+      },
+      required: ['english', 'translation'],
+    },
     execute: async (args: Args) => {
       if (gameState.phase === 'fetching' || gameState.phase === 'done') {
-        return { success: false, message: 'Wrong phase — scan phase is over. Use check_object to verify items during fetch play.' };
+        return { success: false, message: 'Wrong phase — scan phase is over. Use check_object during fetch play.' };
       }
-      if (state.visionBusy) {
-        return { success: false, message: 'Still scanning — hold the item steady for a moment.' };
-      }
-      const language = args.language as string;
-      state.targetLanguage = language;
-      const frame = await grabber.toJpegBase64();
-      if (!frame) {
-        state.consecutiveUnclear++;
-        return { success: false, message: 'No frame. Ask the learner to show the item clearly.' };
-      }
-      state.visionBusy = true;
-      const result = await Promise.race([
-        identifyObject(frame, language),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), 6000)),
-      ]).catch(() => null).finally(() => { state.visionBusy = false; });
-      if (!result) {
-        state.consecutiveUnclear++;
-        if (state.consecutiveUnclear >= 2) {
-          state.consecutiveUnclear = 0;
-          return { success: false, skipped: true, message: 'Still unclear — skip this item and ask them to show the next one.' };
-        }
-        return { success: false, message: 'Frame unclear. Ask the learner to hold the item closer in better light.' };
-      }
-      state.consecutiveUnclear = 0;
-      const count = addScannedItem(gameState, result.english, result.translation);
-      return { success: true, english: result.english, translation: result.translation, totalScanned: count };
+      const english = args.english as string;
+      const translation = args.translation as string;
+      const count = addScannedItem(gameState, english, translation);
+      return { success: true, english, translation, totalScanned: count };
     },
   });
 
@@ -267,11 +252,11 @@ SHOW AND SAY MODE:
 - If the learner says "quit" or "stop", ask if they want to try the Fetch Game or end the call.
 
 FETCH GAME — SCAN PHASE:
-- Tell the learner: "Great! Before we play, hold up 5 things near you one at a time — I'll remember what you have."
-- Tell the learner: "Hold up items one at a time — I'll detect each one automatically. If I miss one, just say anything and I'll scan it." When they say any word while holding an item, call add_to_fetch_list as a fallback. The vision loop handles auto-detection; confirm each item out loud: "Got it, a cup — show me the next one!"
+- Tell the learner: "Great! Before we play, say 5 objects you can see near you — just name them one at a time and I'll add each one."
+- When they say an object name, call add_to_fetch_list with the English word and its [target language] translation (you know the translations). Confirm each one: "Got it — cup, that's la taza! What's the next one?"
 - After 5 items (or more if they want), say: "Perfect, I've got your items. Let's play!"
 - Call start_fetch_game to begin. Use the returned firstItem as the first challenge.
-- Do NOT call start_fetch_game until the learner has actually shown objects. If items keep failing to scan after several attempts, ask the learner to try different objects in better light.
+- Do NOT call start_fetch_game until the learner has named at least 5 objects.
 
 FETCH GAME — PLAY PHASE:
 - Ask for each item using ONLY the target-language word — never say the English word during the fetch challenge. Example: "Can you find la taza?" NOT "Can you find the cup?" The learner must make the connection themselves.
@@ -360,32 +345,8 @@ export default defineAgent({
       const session = new voice.AgentSession();
       await session.start({ agent, room: ctx.room });
 
-      // ── Background vision polling loop ────────────────────────────────────────
-      // Fires every 2500ms during Show & Say (idle) and scan phases.
-      // Calls session.say() directly — no LLM needed to name an object.
-      // Verbal trigger path (LLM tools) stays intact as fallback.
-      (async () => {
-        while (true) {
-          await new Promise(r => setTimeout(r, 1500));
-          if (gameState.phase !== 'scanning' || !state.targetLanguage) continue;
-          if (state.visionBusy) continue;
-          const frame = await grabber.toJpegBase64();
-          if (!frame) continue;
-          state.visionBusy = true;
-          const result = await Promise.race([
-            identifyObject(frame, state.targetLanguage),
-            new Promise<null>(resolve => setTimeout(() => resolve(null), 6000)),
-          ]).catch(() => null).finally(() => { state.visionBusy = false; });
-          if (!result?.english) continue;
-          // Re-check phase after async identifyObject — phase may have changed to 'fetching'
-          if (gameState.phase !== 'scanning') continue;
-          if (result.english.toLowerCase() === state.lastAnnounced.toLowerCase()) continue;
-          state.lastAnnounced = result.english;
-          const word = result.translation ?? result.english;
-          addScannedItem(gameState, result.english, word);
-          await session.say(`Got it — ${result.english}, that's ${word}! Show me the next one.`);
-        }
-      })().catch(err => console.error('[vision-loop] crashed:', err));
+      // Vision loop disabled — scan phase now uses verbal item names only.
+      // Camera is used only for check_object during fetch play.
 
     } catch (err) {
       console.error('[mi-solecito] entry function crashed:', err);
