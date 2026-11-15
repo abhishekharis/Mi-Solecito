@@ -1,6 +1,10 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+}
 
 export type VisionResult = 'match' | 'close' | 'no_match' | 'unclear';
 
@@ -23,7 +27,7 @@ Rules:
 - Keep "seen" to 3-5 words describing the object, never the person.`;
 
   try {
-    const response = await (openai as any).responses.create({
+    const response = await (getClient() as any).responses.create({
       model: 'gpt-6.1-terra',
       reasoning: { effort: 'none' },
       store: false,
@@ -69,7 +73,7 @@ If the most visible thing is a person with no clear object, or the frame is uncl
 Provide the object name in English and its translation in ${targetLanguage} with article if applicable.`;
 
   try {
-    const response = await (openai as any).responses.create({
+    const response = await (getClient() as any).responses.create({
       model: 'gpt-6.1-terra',
       reasoning: { effort: 'none' },
       store: false,
