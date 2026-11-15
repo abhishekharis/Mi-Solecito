@@ -43,18 +43,15 @@ class FrameGrabber {
   }
 
   async toJpegBase64(): Promise<string | null> {
-    if (!this.latestFrame) {
-      console.log('[vision] toJpegBase64 called but no frame captured yet');
-      return null;
-    }
+    if (!this.latestFrame) return null;
     try {
       const f = this.latestFrame.type !== VideoBufferType.RGBA
         ? this.latestFrame.convert(VideoBufferType.RGBA)
         : this.latestFrame;
+      // Downscale to 640×360 — smaller image = faster Gemini response, less GC pressure
       const jpeg = await sharp(Buffer.from(f.data), {
         raw: { width: f.width, height: f.height, channels: 4 },
-      }).jpeg({ quality: 75 }).toBuffer();
-      console.log(`[vision] JPEG encoded — ${jpeg.length} bytes from ${f.width}x${f.height}`);
+      }).resize(640, 360).jpeg({ quality: 60 }).toBuffer();
       return jpeg.toString('base64');
     } catch (err) {
       console.error('[vision] toJpegBase64 error:', err);
@@ -69,7 +66,7 @@ type Args = Record<string, unknown>;
 function buildTools(
   grabber: FrameGrabber,
   gameState: GameState,
-  state: { targetLanguage: string; consecutiveUnclear: number; lastAnnounced: string },
+  state: { targetLanguage: string; consecutiveUnclear: number; lastAnnounced: string; visionBusy: boolean },
 ) {
   // Fire-and-forget: push the final score to the companion score card page
   const pushScore = (): void => {
@@ -124,6 +121,9 @@ function buildTools(
       if (gameState.phase === 'fetching' || gameState.phase === 'done') {
         return { success: false, message: 'Wrong phase — scan phase is over. Use check_object to verify items during fetch play.' };
       }
+      if (state.visionBusy) {
+        return { success: false, message: 'Still scanning — hold the item steady for a moment.' };
+      }
       const language = args.language as string;
       state.targetLanguage = language;
       const frame = await grabber.toJpegBase64();
@@ -131,7 +131,11 @@ function buildTools(
         state.consecutiveUnclear++;
         return { success: false, message: 'No frame. Ask the learner to show the item clearly.' };
       }
-      const result = await identifyObject(frame, language);
+      state.visionBusy = true;
+      const result = await Promise.race([
+        identifyObject(frame, language),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 6000)),
+      ]).catch(() => null).finally(() => { state.visionBusy = false; });
       if (!result) {
         state.consecutiveUnclear++;
         if (state.consecutiveUnclear >= 2) {
@@ -304,7 +308,7 @@ export default defineAgent({
       };
       const grabber = new FrameGrabber();
       const gameState: GameState = createGameState();
-      const state = { targetLanguage: 'Spanish', consecutiveUnclear: 0, lastAnnounced: '' };
+      const state = { targetLanguage: 'Spanish', consecutiveUnclear: 0, lastAnnounced: '', visionBusy: false };
 
       await ctx.connect();
 
@@ -364,9 +368,14 @@ export default defineAgent({
         while (true) {
           await new Promise(r => setTimeout(r, 1500));
           if (gameState.phase !== 'scanning' || !state.targetLanguage) continue;
+          if (state.visionBusy) continue;
           const frame = await grabber.toJpegBase64();
           if (!frame) continue;
-          const result = await identifyObject(frame, state.targetLanguage).catch(() => null);
+          state.visionBusy = true;
+          const result = await Promise.race([
+            identifyObject(frame, state.targetLanguage),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 6000)),
+          ]).catch(() => null).finally(() => { state.visionBusy = false; });
           if (!result?.english) continue;
           // Re-check phase after async identifyObject — phase may have changed to 'fetching'
           if (gameState.phase !== 'scanning') continue;
