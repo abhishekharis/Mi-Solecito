@@ -95,7 +95,7 @@ function buildTools(
   // Show & Say: identify whatever the learner is holding
   const showAndSay = llm.tool({
     name: 'show_and_say',
-    description: "Identify the object in the caller's camera. Call this when the learner shows something in Show & Say mode.",
+    description: "Identify the object in the caller's camera. Call this ONLY in Show & Say mode — never during the fetch game.",
     parameters: { type: 'object', properties: { language: { type: 'string' } }, required: ['language'] },
     execute: async (args: Args) => {
       const language = args.language as string;
@@ -115,7 +115,7 @@ function buildTools(
   // Scan phase: learner shows an item → agent identifies it → adds to game list
   const addToFetchList = llm.tool({
     name: 'add_to_fetch_list',
-    description: 'During the Fetch Game scan phase: identify what the learner is showing and add it to the game list. Returns how many items are in the list so far.',
+    description: 'During the Fetch Game SCAN PHASE only: identify what the learner is showing and add it to the game list. Never call during fetch play phase. Returns how many items are in the list so far.',
     parameters: { type: 'object', properties: { language: { type: 'string' } }, required: ['language'] },
     execute: async (args: Args) => {
       const language = args.language as string;
@@ -347,21 +347,19 @@ export default defineAgent({
       // Verbal trigger path (LLM tools) stays intact as fallback.
       (async () => {
         while (true) {
-          await new Promise(r => setTimeout(r, 2500));
+          await new Promise(r => setTimeout(r, 1500));
           if (gameState.phase !== 'scanning' || !state.targetLanguage) continue;
           const frame = await grabber.toJpegBase64();
           if (!frame) continue;
           const result = await identifyObject(frame, state.targetLanguage).catch(() => null);
           if (!result?.english) continue;
+          // Re-check phase after async identifyObject — phase may have changed to 'fetching'
+          if (gameState.phase !== 'scanning') continue;
           if (result.english.toLowerCase() === state.lastAnnounced.toLowerCase()) continue;
           state.lastAnnounced = result.english;
           const word = result.translation ?? result.english;
-          if (gameState.phase === 'scanning') {
-            addScannedItem(gameState, result.english, word);
-            await session.say(`Got it — ${result.english}, that's ${word}! Show me the next one.`);
-          } else {
-            await session.say(`That's a ${result.english} — in ${state.targetLanguage}, ${word}. Can you say ${word}?`);
-          }
+          addScannedItem(gameState, result.english, word);
+          await session.say(`Got it — ${result.english}, that's ${word}! Show me the next one.`);
         }
       })().catch(err => console.error('[vision-loop] crashed:', err));
 
