@@ -69,7 +69,7 @@ type Args = Record<string, unknown>;
 function buildTools(
   grabber: FrameGrabber,
   gameState: GameState,
-  state: { targetLanguage: string; consecutiveUnclear: number },
+  state: { targetLanguage: string; consecutiveUnclear: number; lastAnnounced: string },
 ) {
   // Fire-and-forget: push the final score to the companion score card page
   const pushScore = (): void => {
@@ -200,6 +200,7 @@ function buildTools(
     execute: async (_args: Args) => {
       resetGame(gameState);
       state.consecutiveUnclear = 0;
+      state.lastAnnounced = '';
       return { restarted: true };
     },
   });
@@ -239,8 +240,8 @@ CALL START SEQUENCE (do this in order, all in one turn):
 3. Begin the chosen activity immediately.
 
 SHOW AND SAY MODE:
-- Tell the learner: "Hold up any object and say 'go' or 'ready' when you're holding it — I'll name it for you."
-- When they say go/ready (or any word signalling they're holding something up), call show_and_say with the chosen language immediately.
+- Tell the learner: "Hold up any object — I'll detect it automatically and name it for you. If I miss one, just say anything and I'll try again."
+- When they say any word while holding an object, call show_and_say with the chosen language immediately (this is the verbal fallback).
 - Say the English name, then the target-language word with article.
 - Ask them to repeat it, then say "Show me another one whenever you're ready!"
 - Repeat for each new object they show.
@@ -248,7 +249,7 @@ SHOW AND SAY MODE:
 
 FETCH GAME — SCAN PHASE:
 - Tell the learner: "Great! Before we play, hold up 5 things near you one at a time — I'll remember what you have."
-- Tell the learner: "Hold up an item one at a time and say anything — 'here', 'this', 'ready', or just 'go' — when you're holding it still." When they say any word while holding an item, call add_to_fetch_list. Confirm each one out loud: "Got it, a cup — show me the next one!"
+- Tell the learner: "Hold up items one at a time — I'll detect each one automatically. If I miss one, just say anything and I'll scan it." When they say any word while holding an item, call add_to_fetch_list as a fallback. The vision loop handles auto-detection; confirm each item out loud: "Got it, a cup — show me the next one!"
 - After 5 items (or more if they want), say: "Perfect, I've got your items. Let's play!"
 - Call start_fetch_game to begin. Use the returned firstItem as the first challenge.
 - If you can't scan enough items (< 3), call start_fetch_game anyway — it will use a preset list.
@@ -288,7 +289,7 @@ export default defineAgent({
       };
       const grabber = new FrameGrabber();
       const gameState: GameState = createGameState();
-      const state = { targetLanguage: 'Spanish', consecutiveUnclear: 0 };
+      const state = { targetLanguage: 'Spanish', consecutiveUnclear: 0, lastAnnounced: '' };
 
       await ctx.connect();
 
@@ -339,6 +340,34 @@ export default defineAgent({
 
       const session = new voice.AgentSession();
       await session.start({ agent, room: ctx.room });
+
+      // ── Background vision polling loop ────────────────────────────────────────
+      // Fires every 2500ms during Show & Say (idle) and scan phases.
+      // Calls session.say() directly — no LLM needed to name an object.
+      // Verbal trigger path (LLM tools) stays intact as fallback.
+      (async () => {
+        while (true) {
+          await new Promise(r => setTimeout(r, 2500));
+          if (
+            (gameState.phase !== 'idle' && gameState.phase !== 'scanning') ||
+            !state.targetLanguage
+          ) continue;
+          const frame = await grabber.toJpegBase64();
+          if (!frame) continue;
+          const result = await identifyObject(frame, state.targetLanguage).catch(() => null);
+          if (!result?.english) continue;
+          if (result.english.toLowerCase() === state.lastAnnounced.toLowerCase()) continue;
+          state.lastAnnounced = result.english;
+          const word = result.translation ?? result.english;
+          if (gameState.phase === 'scanning') {
+            addScannedItem(gameState, result.english, word);
+            await session.say(`Got it — ${result.english}, that's ${word}! Show me the next one.`);
+          } else {
+            await session.say(`That's a ${result.english} — in ${state.targetLanguage}, ${word}. Can you say ${word}?`);
+          }
+        }
+      })().catch(err => console.error('[vision-loop] crashed:', err));
+
     } catch (err) {
       console.error('[mi-solecito] entry function crashed:', err);
       throw err;
