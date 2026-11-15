@@ -48,10 +48,10 @@ class FrameGrabber {
       const f = this.latestFrame.type !== VideoBufferType.RGBA
         ? this.latestFrame.convert(VideoBufferType.RGBA)
         : this.latestFrame;
-      // Downscale to 640×360 — smaller image = faster Gemini response, less GC pressure
+      // 640×480 @ q60 — gpt-6.1-terra detail:low sweet spot (~85 vision tokens)
       const jpeg = await sharp(Buffer.from(f.data), {
         raw: { width: f.width, height: f.height, channels: 4 },
-      }).resize(640, 360).jpeg({ quality: 60 }).toBuffer();
+      }).resize(640, 480).jpeg({ quality: 60 }).toBuffer();
       return jpeg.toString('base64');
     } catch (err) {
       console.error('[vision] toJpegBase64 error:', err);
