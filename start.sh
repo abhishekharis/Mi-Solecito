@@ -24,6 +24,7 @@ sleep 2
 echo "→ Building..."
 cd "$PROJECT_DIR"
 npm run build
+cp src/score-card.html dist/score-card.html
 echo "✓ Build OK"
 
 # ── 2b. Start webhook server ─────────────────────────
