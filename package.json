@@ -24,8 +24,7 @@
     "dotenv": "^16.4.7",
     "hono": "^4.13.18",
     "livekit-server-sdk": "^2.19.3",
-    "openai": "^7.57.0",
-    "sharp": "^0.33.5"
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

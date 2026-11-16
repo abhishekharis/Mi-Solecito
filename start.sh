@@ -11,12 +11,12 @@ echo "── Mi Solecito ──────────────────�
 
 # ── 1. Kill anything left from a previous run ─────────
 echo "→ Stopping old processes..."
-pkill -9 -f "dist/agent.js"            2>/dev/null || true
-pkill -9 -f "dist/server.js"           2>/dev/null || true
-pkill -9 -f "job_proc_lazy_main"       2>/dev/null || true
+pkill -9 -f "dist/agent.js"            2>/dev/null || true  # worker (relative path)
+pkill -9 -f "job_proc_lazy_main"       2>/dev/null || true  # job subprocs
 pkill -9 -f "inference_proc_lazy_main" 2>/dev/null || true
 pkill -9 -f "@trychert/facetime"       2>/dev/null || true
 pkill -9 -f "node_modules/.bin/chert"  2>/dev/null || true
+ps aux | grep "Chert project" | grep -v grep | awk '{print $2}' | xargs kill -9 2>/dev/null || true
 lsof -ti :8081 | xargs kill -9        2>/dev/null || true
 sleep 2
 
@@ -29,7 +29,7 @@ echo "✓ Build OK"
 
 # ── 2b. Start webhook server ─────────────────────────
 echo "→ Starting webhook server..."
-node dist/server.js &
+node --env-file .env dist/server.js &
 SERVER_PID=$!
 sleep 1
 echo "✓ Webhook server started (PID $SERVER_PID)"

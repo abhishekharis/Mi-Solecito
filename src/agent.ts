@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { fileURLToPath } from 'url';
 import { ServerOptions, cli, defineAgent, JobContext, JobProcess, llm, voice } from '@livekit/agents';
 import { LLM } from '@livekit/agents-plugin-google';
-import { TTS } from '@livekit/agents-plugin-elevenlabs';
+import { TTS } from '@livekit/agents-plugin-deepgram';
 import { STT } from '@livekit/agents-plugin-deepgram';
 import { AgentDispatchClient } from 'livekit-server-sdk';
 import { VideoStream, VideoBufferType, TrackKind, RoomEvent } from '@livekit/rtc-node';
@@ -48,10 +48,10 @@ class FrameGrabber {
       const f = this.latestFrame.type !== VideoBufferType.RGBA
         ? this.latestFrame.convert(VideoBufferType.RGBA)
         : this.latestFrame;
-      // 1280×720 @ q70 — gpt-6.1-terra detail:high for fine object distinction
+      // 640×480 @ q70 — sufficient for Gemini, 3× less GC pressure than 1280×720
       const jpeg = await sharp(Buffer.from(f.data), {
         raw: { width: f.width, height: f.height, channels: 4 },
-      }).resize(1280, 720).jpeg({ quality: 70 }).toBuffer();
+      }).resize(640, 480).jpeg({ quality: 70 }).toBuffer();
       return jpeg.toString('base64');
     } catch (err) {
       console.error('[vision] toJpegBase64 error:', err);
@@ -295,7 +295,7 @@ export default defineAgent({
     // Initialize plugins here so entry() doesn't block the event loop on first call
     proc.userData.stt = new STT({ apiKey: process.env.DEEPGRAM_API_KEY });
     proc.userData.llm = new LLM({ model: 'gemini-3.6-flash', apiKey: process.env.GEMINI_API_KEY, maxOutputTokens: 400 });
-    proc.userData.tts = new TTS({ apiKey: process.env.ELEVENLABS_API_KEY });
+    proc.userData.tts = new TTS();
   },
 
   entry: async (ctx: JobContext) => {
@@ -340,13 +340,7 @@ export default defineAgent({
 
       const tools = buildTools(grabber, gameState, state);
 
-      class MiSolecitoAgent extends voice.Agent {
-        override async onEnter(): Promise<void> {
-          this.session.generateReply();
-        }
-      }
-
-      const agent = new MiSolecitoAgent({
+      const agent = new voice.Agent({
         instructions: INSTRUCTIONS,
         stt,
         llm,
@@ -356,6 +350,25 @@ export default defineAgent({
 
       const session = new voice.AgentSession();
       await session.start({ agent, room: ctx.room });
+
+      // Greet only after Chert's FaceTime bridge is ready — must be within 10 s of bridge_ready.
+      // Using session.say() (TTS only, ~1-2 s) instead of generateReply() (LLM+TTS, ~7 s)
+      // so we reliably beat the deadline.
+      let bridgeGreeted = false;
+      const greetOnBridgeReady = () => {
+        if (bridgeGreeted) return;
+        bridgeGreeted = true;
+        try { session.say('Hey! Ready to learn some words? Which language are we trying today?'); }
+        catch (err) { console.error('[greet] say failed:', err); }
+      };
+
+      if (ctx.room.metadata?.includes('chert_bridge_ready')) {
+        greetOnBridgeReady();
+      } else {
+        ctx.room.on(RoomEvent.RoomMetadataChanged, (metadata: string) => {
+          if (metadata?.includes('chert_bridge_ready')) greetOnBridgeReady();
+        });
+      }
 
       // Auto-scan loop — fires every 2.5 s during scan phase only.
       // Vision is now on OpenAI (not LiveKit inference proc) so concurrent calls
